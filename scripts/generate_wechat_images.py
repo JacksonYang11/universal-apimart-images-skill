@@ -22,7 +22,7 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_API_BASE = "https://api.apimart.ai"
-DEFAULT_OUTPUT_DIR = r"D:\AI-generated-images"
+DEFAULT_OUTPUT_DIR = "~/AI-generated-images"
 COMPLETE_STATUSES = {"completed", "complete", "succeeded", "success", "done", "finished"}
 FAILED_STATUSES = {"failed", "failure", "error", "cancelled", "canceled", "timeout"}
 
@@ -49,9 +49,9 @@ def main() -> int:
         raise SystemExit("JSON must contain a non-empty images array.")
 
     if args.run_dir:
-        run_dir = Path(args.run_dir)
+        run_dir = Path(args.run_dir).expanduser()
     else:
-        output_root = Path(args.output_dir or data.get("output_dir") or DEFAULT_OUTPUT_DIR)
+        output_root = Path(args.output_dir or data.get("output_dir") or DEFAULT_OUTPUT_DIR).expanduser()
         run_dir = output_root / f"{dt.datetime.now():%Y%m%d_%H%M%S}_{sanitize_filename(article_title)}"
     run_dir.mkdir(parents=True, exist_ok=True)
 

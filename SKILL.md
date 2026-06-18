@@ -9,10 +9,10 @@ description: 通用微信公众号文章 APIMart 批量生图技能。用于 Tra
 
 为微信公众号文章生成推文导语、1 张封面图和 4-5 张正文插图，并通过 APIMart `gpt-image-2` 批量生图。
 
-本技能是通用版，不依赖 Codex 的 `.codex/skills` 机制。其他智能体只需要读取本文件，并运行本目录内脚本：
+本技能是通用版，不依赖 Codex 的 `.codex/skills` 机制。其他智能体只需要读取本文件，并在本技能目录内运行脚本：
 
 ```text
-D:\ProgramData\skills\universal-wechat-apimart-images\scripts\generate_wechat_images.py
+scripts/generate_wechat_images.py
 ```
 
 ## 执行原则
@@ -26,7 +26,7 @@ D:\ProgramData\skills\universal-wechat-apimart-images\scripts\generate_wechat_im
 3. 生成推文导语、封面图提示词、正文插图提示词。
 4. 先展示给用户确认或修改。
 5. 用户确认后生成 JSON 任务文件。
-6. 调用 `scripts\generate_wechat_images.py`。
+6. 调用 `scripts/generate_wechat_images.py`。
 7. 脚本完成后报告输出目录和失败情况。
 
 ## 文章来源
@@ -89,9 +89,9 @@ JSON 中记录 `article_source`：
 ```json
 {
   "article_title": "文章标题",
-  "article_source": "D:\\path\\to\\article.md",
+  "article_source": "/Users/jackson/Documents/projects/Articles/path/to/article.md",
   "wechat_intro": "简洁推文导语",
-  "output_dir": "D:\\AI-generated-images",
+  "output_dir": "~/AI-generated-images",
   "images": [
     {
       "name": "cover",
@@ -114,7 +114,7 @@ JSON 中记录 `article_source`：
 - `article_title`：文章标题，用于输出文件夹命名。
 - `article_source`：文章来源记录。
 - `wechat_intro`：推文导语。
-- `output_dir`：默认 `D:\\AI-generated-images`。
+- `output_dir`：默认 `~/AI-generated-images`。
 - `images[].name`：英文、数字、下划线命名，例如 `cover`、`illustration_01`。
 - `images[].usage`：中文用途或插入位置。
 - `images[].prompt`：最终中文生图提示词。
@@ -122,11 +122,11 @@ JSON 中记录 `article_source`：
 
 ## 脚本命令
 
-PowerShell：
+macOS / zsh：
 
-```powershell
-$env:APIMART_API_KEY = [Environment]::GetEnvironmentVariable("APIMART_API_KEY", "User")
-python "D:\ProgramData\skills\universal-wechat-apimart-images\scripts\generate_wechat_images.py" "D:\path\to\tasks.json"
+```bash
+# 确保当前 shell 已设置 APIMART_API_KEY
+python3 "scripts/generate_wechat_images.py" "path/to/tasks.json"
 ```
 
 不要让用户在聊天里粘贴 API key。脚本读取用户环境变量 `APIMART_API_KEY`。
@@ -166,8 +166,8 @@ python "D:\ProgramData\skills\universal-wechat-apimart-images\scripts\generate_w
 
 如需继续写入原目录：
 
-```powershell
-python "D:\ProgramData\skills\universal-wechat-apimart-images\scripts\generate_wechat_images.py" "D:\path\to\tasks-resume.json" --run-dir "D:\AI-generated-images\existing-run-folder"
+```bash
+python3 "scripts/generate_wechat_images.py" "path/to/tasks-resume.json" --run-dir "~/AI-generated-images/existing-run-folder"
 ```
 
 ## 失败处理

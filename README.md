@@ -11,17 +11,17 @@
 
 ### 设置 API Key
 
-```powershell
-[Environment]::SetEnvironmentVariable("APIMART_API_KEY", "你的API密钥", "User")
+```bash
+export APIMART_API_KEY="你的API密钥"
 ```
 
 ### 生成图片
 
 1. 准备一个 JSON 任务文件（见下方格式）。
-2. 运行脚本：
+2. 在项目根目录运行脚本：
 
-```powershell
-python "scripts\generate_wechat_images.py" "path\to\tasks.json"
+```bash
+python3 "scripts/generate_wechat_images.py" "path/to/tasks.json"
 ```
 
 ## JSON 任务文件格式
@@ -31,7 +31,7 @@ python "scripts\generate_wechat_images.py" "path\to\tasks.json"
   "article_title": "文章标题",
   "article_source": "文章来源（文件路径/conversation/pasted_text）",
   "wechat_intro": "简洁推文导语",
-  "output_dir": "D:\\AI-generated-images",
+  "output_dir": "~/AI-generated-images",
   "images": [
     {
       "name": "cover",
@@ -56,7 +56,7 @@ python "scripts\generate_wechat_images.py" "path\to\tasks.json"
 | `article_title` | 文章标题，用于输出文件夹命名 |
 | `article_source` | 文章来源记录 |
 | `wechat_intro` | 推文导语 |
-| `output_dir` | 输出目录，默认 `D:\AI-generated-images` |
+| `output_dir` | 输出目录，默认 `~/AI-generated-images` |
 | `images[].name` | 英文/数字/下划线命名 |
 | `images[].usage` | 中文用途或插入位置描述 |
 | `images[].prompt` | 中文生图提示词 |
@@ -70,7 +70,7 @@ python "scripts\generate_wechat_images.py" "path\to\tasks.json"
 | `json_file` | JSON 任务文件路径（必填） | - |
 | `--api-key` | APIMart API Key | 环境变量 `APIMART_API_KEY` |
 | `--api-base` | API 基础 URL | `https://api.apimart.ai` |
-| `--output-dir` | 输出根目录 | JSON 中的 `output_dir` 或 `D:\AI-generated-images` |
+| `--output-dir` | 输出根目录 | JSON 中的 `output_dir` 或 `~/AI-generated-images` |
 | `--run-dir` | 指定输出目录（用于恢复执行） | - |
 | `--initial-wait` | 任务提交后等待秒数 | `60` |
 | `--poll-interval` | 轮询间隔秒数 | `30` |
@@ -103,8 +103,8 @@ python "scripts\generate_wechat_images.py" "path\to\tasks.json"
 
 使用 `--run-dir` 指向已有输出目录：
 
-```powershell
-python "scripts\generate_wechat_images.py" "tasks-resume.json" --run-dir "D:\AI-generated-images\20240101_120000_某文章"
+```bash
+python3 "scripts/generate_wechat_images.py" "tasks-resume.json" --run-dir "~/AI-generated-images/20240101_120000_某文章"
 ```
 
 ## 失败处理
