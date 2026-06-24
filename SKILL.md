@@ -152,7 +152,9 @@ python3 "scripts/generate_wechat_images.py" "path/to/tasks.json"
 
 ## 恢复执行
 
-如果已经有 `task_id`，不要重新提交任务。把 `task_id` 写入对应图片对象：
+**恢复前，必须先读 `--run-dir` 目录下的 `manifest.json`，从中提取每个任务的 `task_id`，写入要传给脚本的 JSON 文件中。** 否则脚本会因为没有 `task_id` 而重新提交生图任务，消耗额外额度。
+
+把 `task_id` 写入对应图片对象：
 
 ```json
 {
