@@ -17,7 +17,7 @@ export APIMART_API_KEY="你的API密钥"
 
 ### 生成图片
 
-1. 准备一个 JSON 任务文件（见下方格式）。
+1. 准备一个 JSON 任务文件（见下方格式）。**必须包含一张 `opening` 插图，提示词基于文章开头段落内容编写。**
 2. 在项目根目录运行脚本：
 
 ```bash
@@ -37,6 +37,12 @@ python3 "scripts/generate_wechat_images.py" "path/to/tasks.json"
       "name": "cover",
       "usage": "文章总封面",
       "prompt": "中文生图提示词",
+      "refs": []
+    },
+    {
+      "name": "opening",
+      "usage": "文章开篇插图，放置于正文开头",
+      "prompt": "基于文章开头段落的中文生图提示词",
       "refs": []
     },
     {
@@ -62,6 +68,8 @@ python3 "scripts/generate_wechat_images.py" "path/to/tasks.json"
 | `images[].prompt` | 中文生图提示词 |
 | `images[].refs` | 可选参考图（公网 URL 或本地路径） |
 | `images[].task_id` | 可选，恢复执行时使用 |
+
+> 强制规则：图片列表中必须包含一张 `name` 为 `opening` 的开篇插图，其 `prompt` 必须基于文章开头段落的具体内容编写，不可使用泛化描述。
 
 ## 命令行参数
 
