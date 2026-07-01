@@ -197,10 +197,19 @@ def normalize_reference(ref: Any, base_dir: Path) -> str:
     return f"data:{mime};base64,{encoded}"
 
 
+QUALITY_SUFFIX = (
+    "。注意：人物必须五官端正、手指数量正常（单手五指）、身体结构准确；"
+    "器物和武器必须形态正常、无扭曲变形；画面透视和空间关系合理。"
+)
+
+
 def build_payload(task: dict[str, Any]) -> dict[str, Any]:
+    prompt = task["prompt"].rstrip()
+    if not prompt.endswith(QUALITY_SUFFIX):
+        prompt = prompt + QUALITY_SUFFIX
     payload: dict[str, Any] = {
         "model": "gpt-image-2",
-        "prompt": task["prompt"],
+        "prompt": prompt,
         "n": 1,
         "size": "16:9",
         "resolution": "1k",
