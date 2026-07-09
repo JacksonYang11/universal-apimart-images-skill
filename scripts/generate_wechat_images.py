@@ -124,7 +124,7 @@ def main() -> int:
     if failures == 0:
         print(f"[wait] all tasks started; waiting {max(args.initial_wait, 0):g} seconds before polling")
         time.sleep(max(args.initial_wait, 0))
-        failures += poll_all_tasks(records, manifest, run_dir, args.api_base, args.api_key, args.poll_interval, args.timeout)
+        failures += poll_all_tasks(records, manifest, run_dir, args.api_base, args.api_key, args.poll_interval, args.timeout, record_tasks)
 
     if failures == 0:
         failures += download_all_images(record_tasks, manifest, run_dir)
@@ -199,7 +199,8 @@ def normalize_reference(ref: Any, base_dir: Path) -> str:
 
 QUALITY_SUFFIX = (
     "。注意：人物必须五官端正、手指数量正常（单手五指）、身体结构准确；"
-    "器物和武器必须形态正常、无扭曲变形；画面透视和空间关系合理。"
+    "器物和武器必须形态正常、无扭曲变形；画面透视和空间关系合理；"
+    "画面中不要出现大段说明性文字，可有少量简洁文字点缀。"
 )
 
 
@@ -273,8 +274,9 @@ def poll_all_tasks(
     api_key: str,
     interval: float,
     timeout: float,
+    record_tasks: list[tuple[dict[str, Any], dict[str, Any]]],
 ) -> int:
-    pending = [record for record in records if record.get("task_id") and record.get("status") != "failed"]
+    pending = [record for record in records if record.get("task_id") and record.get("status") not in ("failed", "downloaded")]
     deadline = time.monotonic() + timeout
     failures = 0
 
@@ -297,6 +299,25 @@ def poll_all_tasks(
                     record["status"] = "completed"
                     record.pop("last_response", None)
                     record.pop("last_poll_error", None)
+
+                    # Download immediately when a task completes
+                    matching_task = _find_task_for_record(record, record_tasks)
+                    if matching_task is not None:
+                        try:
+                            downloaded = []
+                            for image_index, image_url in enumerate(image_urls[:1], start=1):
+                                filename = make_image_filename(matching_task, image_index, image_url)
+                                file_path = download_file(image_url, run_dir / filename)
+                                downloaded.append(str(file_path))
+                            record["files"] = downloaded
+                            record["status"] = "downloaded"
+                            print(f"[downloaded] {record['name']} -> {downloaded[0]}")
+                        except Exception as exc:  # noqa: BLE001 - download failure for one task should not block others.
+                            record["status"] = "download_failed"
+                            record["error"] = str(exc)
+                            print(f"[download failed] {record['name']}: {exc}", file=sys.stderr)
+                            failures += 1
+
                     pending.remove(record)
                     completed_this_round += 1
                 elif status in FAILED_STATUSES:
@@ -315,10 +336,11 @@ def poll_all_tasks(
         if failures:
             return failures
         if pending:
-            print(f"[wait] {len(records) - len(pending)}/{len(records)} task(s) completed; polling again in {max(interval, 1):g} seconds")
+            downloaded_count = sum(1 for r in records if r.get("status") == "downloaded")
+            print(f"[wait] {downloaded_count}/{len(records)} task(s) downloaded; polling again in {max(interval, 1):g} seconds")
             time.sleep(max(interval, 1))
         elif completed_this_round:
-            print(f"[complete] all {len(records)} task(s) generated successfully")
+            print(f"[complete] all {len(records)} task(s) generated and downloaded successfully")
 
     for record in pending:
         record["status"] = "failed"
@@ -329,6 +351,17 @@ def poll_all_tasks(
     return failures
 
 
+def _find_task_for_record(
+    record: dict[str, Any],
+    record_tasks: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> dict[str, Any] | None:
+    """Find the task dict corresponding to a record by identity match."""
+    for rec, task in record_tasks:
+        if rec is record:
+            return task
+    return None
+
+
 def download_all_images(
     record_tasks: list[tuple[dict[str, Any], dict[str, Any]]],
     manifest: dict[str, Any],
@@ -336,6 +369,11 @@ def download_all_images(
 ) -> int:
     failures = 0
     for record, task in record_tasks:
+        if record.get("status") == "downloaded":
+            print(f"[skip] {record['name']} already downloaded")
+            continue
+        if record.get("status") == "failed":
+            continue
         try:
             image_urls = record.get("image_urls") or []
             if not image_urls:
