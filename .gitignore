@@ -1,0 +1,14 @@
+# Local credentials and editor backup files; never distribute these.
+.secrets.json
+.secrets.json.*
+.secrets.*.json
+!.secrets.example.json
+Secrets.json
+Secrets.json.*
+.env
+.env.*
+!.env.example
+
+# Local Python artifacts
+__pycache__/
+*.py[cod]

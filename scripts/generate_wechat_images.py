@@ -21,21 +21,58 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
-DEFAULT_API_BASE = "https://api.apimart.ai"
+SECRETS_FILE = Path(__file__).resolve().parent.parent / ".secrets.json"
 DEFAULT_OUTPUT_DIR = "~/AI-generated-images"
 COMPLETE_STATUSES = {"completed", "complete", "succeeded", "success", "done", "finished"}
 FAILED_STATUSES = {"failed", "failure", "error", "cancelled", "canceled", "timeout"}
 
 
+def load_api_profile(profile_name: str | None, *, require_credentials: bool = True) -> tuple[str, str, str]:
+    """Read a URL/key pair from the local project file, without printing its contents."""
+    try:
+        data = json.loads(SECRETS_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise SystemExit("Missing .secrets.json. Copy .secrets.example.json and fill in a profile.") from None
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise SystemExit("Cannot read .secrets.json as UTF-8 JSON. Check its format and permissions.") from None
+    if not isinstance(data, dict) or not isinstance(data.get("profiles"), dict):
+        raise SystemExit(".secrets.json must contain a profiles object.")
+    selected = profile_name if profile_name is not None else data.get("active_profile")
+    if not isinstance(selected, str) or not selected.strip():
+        raise SystemExit("Select a profile using active_profile or --profile.")
+    profile = data["profiles"].get(selected)
+    if not isinstance(profile, dict):
+        raise SystemExit("Selected profile does not exist in .secrets.json.")
+    api_base, api_key = profile.get("api_base"), profile.get("api_key")
+    if not isinstance(api_base, str) or not isinstance(api_key, str):
+        raise SystemExit("Selected profile must contain string api_base and api_key fields.")
+    api_base, api_key = api_base.strip().rstrip("/"), api_key.strip()
+    if api_base:
+        try:
+            parsed = urlparse(api_base)
+            valid = (parsed.scheme == "https" and bool(parsed.hostname) and parsed.port != 0
+                     and parsed.username is None and parsed.password is None
+                     and not parsed.query and not parsed.fragment
+                     and not any(ch.isspace() for ch in api_base))
+        except ValueError:
+            valid = False
+        if not valid:
+            raise SystemExit("api_base must be an HTTPS base URL without credentials, query, or fragment.")
+    if any(ch.isspace() for ch in api_key):
+        raise SystemExit("api_key must not contain whitespace.")
+    if require_credentials and (not api_base or not api_key):
+        raise SystemExit("Fill in api_base and api_key for the selected profile in .secrets.json.")
+    return selected, api_base, api_key
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate and download APIMart GPT-Image-2 tasks.")
     parser.add_argument("json_file", help="Path to the approved WeChat image task JSON.")
-    parser.add_argument("--api-key", default=os.environ.get("APIMART_API_KEY"), help="APIMart API key. Defaults to APIMART_API_KEY.")
-    parser.add_argument("--api-base", default=os.environ.get("APIMART_API_BASE", DEFAULT_API_BASE), help="APIMart API base URL.")
+    parser.add_argument("--profile", default=None, help="Profile in the project's .secrets.json. Defaults to active_profile.")
     parser.add_argument("--output-dir", default=None, help=f"Output root. Defaults to JSON output_dir or {DEFAULT_OUTPUT_DIR}.")
     parser.add_argument("--run-dir", default=None, help="Exact output folder to use. Useful when resuming existing task IDs.")
-    parser.add_argument("--initial-wait", type=float, default=60.0, help="Seconds to wait after all tasks are submitted before first polling attempt.")
-    parser.add_argument("--poll-interval", type=float, default=30.0, help="Seconds between batch polling attempts.")
+    parser.add_argument("--initial-wait", type=float, default=90.0, help="Seconds to wait after all tasks are submitted before first polling attempt (default: %(default)g).")
+    parser.add_argument("--poll-interval", type=float, default=45.0, help="Seconds between batch polling attempts (default: %(default)g).")
     parser.add_argument("--timeout", type=float, default=900.0, help="Maximum seconds to wait after the initial wait for all tasks.")
     parser.add_argument("--dry-run", action="store_true", help="Validate input and show planned API payloads without calling APIMart.")
     parser.add_argument("--no-notify", action="store_true", help="Disable completion sound and message box.")
@@ -47,6 +84,10 @@ def main() -> int:
     images = data.get("images")
     if not isinstance(images, list) or not images:
         raise SystemExit("JSON must contain a non-empty images array.")
+
+    profile, api_base, api_key = load_api_profile(args.profile, require_credentials=not args.dry_run)
+    size = str(data.get("size") or "16:9").strip()
+    resolution = str(data.get("resolution") or "1k").strip()
 
     if args.run_dir:
         run_dir = Path(args.run_dir).expanduser()
@@ -61,10 +102,10 @@ def main() -> int:
         "article_source": data.get("article_source", ""),
         "wechat_intro": data.get("wechat_intro", ""),
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
-        "api_base": args.api_base,
+        "api_profile": profile,
         "model": "gpt-image-2",
-        "resolution": "1k",
-        "size": "16:9",
+        "resolution": resolution,
+        "size": size,
         "n": 1,
         "output_dir": str(run_dir),
         "tasks": [],
@@ -72,15 +113,12 @@ def main() -> int:
 
     if args.dry_run:
         for task in tasks:
-            payload = build_payload(task)
+            payload = build_payload(task, size, resolution)
             manifest["tasks"].append({"name": task["name"], "usage": task["usage"], "payload": payload})
         write_manifest_and_preview(run_dir, manifest)
         print(f"Dry run OK. Planned {len(tasks)} image task(s).")
         print(f"Output folder: {run_dir}")
         return 0
-
-    if not args.api_key:
-        raise SystemExit("APIMART_API_KEY is not set. Set it or pass --api-key.")
 
     failures = 0
     records: list[dict[str, Any]] = []
@@ -105,8 +143,8 @@ def main() -> int:
                 record["status"] = "submitted"
                 print(f"[resume] {task['name']} task_id={task_id}")
             else:
-                payload = build_payload(task)
-                response = post_json(args.api_base, "/v1/images/generations", payload, args.api_key)
+                payload = build_payload(task, size, resolution)
+                response = post_json(api_base, "/v1/images/generations", payload, api_key)
                 task_id = extract_task_id(response)
                 record["task_id"] = task_id
                 record["submit_response"] = response
@@ -124,7 +162,7 @@ def main() -> int:
     if failures == 0:
         print(f"[wait] all tasks started; waiting {max(args.initial_wait, 0):g} seconds before polling")
         time.sleep(max(args.initial_wait, 0))
-        failures += poll_all_tasks(records, manifest, run_dir, args.api_base, args.api_key, args.poll_interval, args.timeout, record_tasks)
+        failures += poll_all_tasks(records, manifest, run_dir, api_base, api_key, args.poll_interval, args.timeout, record_tasks)
 
     if failures == 0:
         failures += download_all_images(record_tasks, manifest, run_dir)
@@ -204,7 +242,7 @@ QUALITY_SUFFIX = (
 )
 
 
-def build_payload(task: dict[str, Any]) -> dict[str, Any]:
+def build_payload(task: dict[str, Any], size: str = "16:9", resolution: str = "1k") -> dict[str, Any]:
     prompt = task["prompt"].rstrip()
     if not prompt.endswith(QUALITY_SUFFIX):
         prompt = prompt + QUALITY_SUFFIX
@@ -212,8 +250,8 @@ def build_payload(task: dict[str, Any]) -> dict[str, Any]:
         "model": "gpt-image-2",
         "prompt": prompt,
         "n": 1,
-        "size": "16:9",
-        "resolution": "1k",
+        "size": size,
+        "resolution": resolution,
     }
     if task["image_urls"]:
         payload["image_urls"] = task["image_urls"]

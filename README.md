@@ -1,172 +1,35 @@
-# Universal WeChat APIMart Image Generator
+# 公众号文章配图 Skill
 
-通用微信公众号文章 APIMart 批量生图技能。根据文章内容自动生成推文导语、封面图和正文插图提示词，通过 APIMart `gpt-image-2` 模型批量生成、轮询、下载和通知。
+这是一个给公众号文章配图的 AI Agent 技能。给它一篇草稿，Agent 会拟一段导语，并为封面、开篇和正文插图写好生图提示词。你确认提示词后，脚本会批量生成图片并保存到本机。
 
-## 快速开始
+## 使用前准备
 
-### 环境要求
+- 本机需安装 Python 3.10 或更新版本，并能访问生图服务。用 Agent 时，它还需要能读取文章和 [SKILL.md](SKILL.md)，并运行本地脚本。
+- 准备 APIMart 或兼容服务的 HTTPS 基础地址和 API Key。服务需要支持 `gpt-image-2`、`POST /v1/images/generations` 和 `GET /v1/tasks/{task_id}`。实际生图会消耗服务额度。
 
-- Python 3.8+
-- APIMart API Key（从 [APIMart](https://api.apimart.ai) 获取）
+在项目根目录将 [.secrets.example.json](.secrets.example.json) 复制为 `.secrets.json`。已有配置时直接编辑原文件。填写 `profiles.primary` 下的 `api_base` 和 `api_key`，并确认 `active_profile` 指向这组配置。`backup` 可留空。在 macOS 或 Linux 上可用 `chmod 600 .secrets.json` 限制读写权限。打包或上传 Skill 时请排除私密文件。
 
-### 设置 API Key
+## 怎么用
 
-```bash
-export APIMART_API_KEY="你的API密钥"
-```
+**用 AI Agent。** 提供文章文件或正文，让 Agent 按 [SKILL.md](SKILL.md) 执行。可以直接这样提需求。
 
-### 生成图片
+> 给这篇公众号文章做一张封面和几张正文插图，包含一张开篇图。先给我看导语和完整提示词，等我确认后再生成图片。
 
-1. 准备一个 JSON 任务文件（见下方格式）。**必须包含一张 `opening` 插图，提示词基于文章开头段落内容编写。**
-2. 在项目根目录运行脚本：
+**直接运行脚本。** 如果已有生图任务 JSON，在项目根目录运行下方命令。任务格式和开篇插图要求见 [SKILL.md 的 JSON 任务说明](SKILL.md#json-任务)。
 
 ```bash
-python3 "scripts/generate_wechat_images.py" "path/to/tasks.json"
+python3 scripts/generate_wechat_images.py path/to/tasks.json
 ```
 
-## JSON 任务文件格式
+图片默认保存到 `~/AI-generated-images/` 下以时间和文章标题命名的子目录。打开其中的 `preview.html` 可以逐张检查。
 
-```json
-{
-  "article_title": "文章标题",
-  "article_source": "文章来源（文件路径/conversation/pasted_text）",
-  "wechat_intro": "简洁推文导语",
-  "output_dir": "~/AI-generated-images",
-  "images": [
-    {
-      "name": "cover",
-      "usage": "文章总封面",
-      "prompt": "中文生图提示词",
-      "refs": []
-    },
-    {
-      "name": "opening",
-      "usage": "文章开篇插图，放置于正文开头",
-      "prompt": "基于文章开头段落的中文生图提示词",
-      "refs": []
-    },
-    {
-      "name": "illustration_01",
-      "usage": "正文第一处插图",
-      "prompt": "中文生图提示词",
-      "refs": []
-    }
-  ]
-}
-```
+## 工作原理
 
-### 字段说明
+Agent 根据文章写提示词，将你确认的内容整理成任务 JSON。Python 脚本读取本机选中的 URL 和 Key，向生图服务提交任务。提交完成后默认等待 90 秒，之后每 45 秒查询一次未完成的任务。图片生成后下载到本机。任务记录保存在 `manifest.json`，可用于恢复执行。
 
-| 字段 | 说明 |
-|------|------|
-| `article_title` | 文章标题，用于输出文件夹命名 |
-| `article_source` | 文章来源记录 |
-| `wechat_intro` | 推文导语 |
-| `output_dir` | 输出目录，默认 `~/AI-generated-images` |
-| `images[].name` | 英文/数字/下划线命名 |
-| `images[].usage` | 中文用途或插入位置描述 |
-| `images[].prompt` | 中文生图提示词 |
-| `images[].refs` | 可选参考图（公网 URL 或本地路径） |
-| `images[].task_id` | 可选，恢复执行时使用 |
+## 详细用法
 
-> 强制规则：图片列表中必须包含一张 `name` 为 `opening` 的开篇插图，其 `prompt` 必须基于文章开头段落的具体内容编写，不可使用泛化描述。
+- 任务字段、提示词规则、参考图和中断恢复见 [SKILL.md](SKILL.md)。
+- 查看所有命令行参数可运行 `python3 scripts/generate_wechat_images.py --help`。常用参数有 `--profile backup`（临时换一组配置）和 `--dry-run`（只验证任务并生成预览）。
 
-## 生图质量约束（必读）
-
-**所有提示词和最终生成的图片必须满足以下质量要求：**
-
-1. **禁止明显生图错误**：图片中可以有艺术化表达和风格化处理，但绝不能出现明显的 AI 生图低级错误。包括但不限于：
-   - 人体结构异常（如六根手指、多出一只手、手指粘连或扭曲、关节反折）
-   - 器物变形（如剑像面条一样扭曲、武器不对称、器具结构不合常理）
-   - 面部或五官错乱（如三只眼、嘴鼻位置偏移、面部不对称）
-   - 文字乱码（如画面中出现无法辨认的伪文字、扭曲字符）
-   - 画面中出现大段说明性文字（可有少量简洁文字点缀，但不能太多）
-   - 透视或空间关系崩溃（如人物悬浮、物体穿插、比例严重失调）
-
-2. **提示词自动追加负向约束**：脚本会自动在每条提示词末尾追加质量声明（包含禁止大量文字），确保生成结果符合上述要求。
-
-3. **生成后人工抽检**：图片下载完成后，必须通过 `preview.html` 逐张检查，确认无上述低级错误。发现问题图片需重新生成。
-
-## 生图质量约束（必读）
-
-**所有提示词和最终生成的图片必须满足以下质量要求：**
-
-1. **禁止明显生图错误**：图片中可以有艺术化表达和风格化处理，但绝不能出现明显的 AI 生图低级错误。包括但不限于：
-   - 人体结构异常（如六根手指、多出一只手、手指粘连或扭曲、关节反折）
-   - 器物变形（如剑像面条一样扭曲、武器不对称、器具结构不合常理）
-   - 面部或五官错乱（如三只眼、嘴鼻位置偏移、面部不对称）
-   - 文字乱码（如画面中出现无法辨认的伪文字、扭曲字符）
-   - 画面中出现大段说明性文字（可有少量简洁文字点缀，但不能太多）
-   - 透视或空间关系崩溃（如人物悬浮、物体穿插、比例严重失调）
-
-2. **提示词自动追加负向约束**：脚本会自动在每条提示词末尾追加质量声明（包含禁止大量文字），确保生成结果符合上述要求。
-
-3. **生成后人工抽检**：图片下载完成后，必须通过 `preview.html` 逐张检查，确认无上述低级错误。发现问题图片需重新生成。
-
-## 命令行参数
-
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `json_file` | JSON 任务文件路径（必填） | - |
-| `--api-key` | APIMart API Key | 环境变量 `APIMART_API_KEY` |
-| `--api-base` | API 基础 URL | `https://api.apimart.ai` |
-| `--output-dir` | 输出根目录 | JSON 中的 `output_dir` 或 `~/AI-generated-images` |
-| `--run-dir` | 指定输出目录（用于恢复执行） | - |
-| `--initial-wait` | 任务提交后等待秒数 | `60` |
-| `--poll-interval` | 轮询间隔秒数 | `30` |
-| `--timeout` | 总超时秒数 | `900` |
-| `--dry-run` | 仅验证和预览，不调用 API | `false` |
-| `--no-notify` | 禁用完成通知 | `false` |
-
-## 执行流程
-
-1. 读取 JSON 任务文件，验证所有字段。
-2. 提交全部生图任务至 APIMart `gpt-image-2`（分辨率 `1k`，尺寸 `16:9`）。
-3. 待所有任务获取到 `task_id` 后，等待 60 秒。
-4. 每 30 秒批量轮询一次任务状态。
-5. 任务完成后立即下载对应图片，记录已下载的图片编号，避免重复生成和下载。
-6. 全部下载成功后播放声音并弹窗通知。
-
-## 恢复执行
-
-如果已有 `task_id`，可在 JSON 中添加 `task_id` 字段避免重复提交：
-
-```json
-{
-  "name": "cover",
-  "usage": "文章总封面",
-  "task_id": "task_xxx",
-  "prompt": "...",
-  "refs": []
-}
-```
-
-使用 `--run-dir` 指向已有输出目录：
-
-```bash
-python3 "scripts/generate_wechat_images.py" "tasks-resume.json" --run-dir "~/AI-generated-images/20240101_120000_某文章"
-```
-
-## 失败处理
-
-- **任务失败/超时**：不下载、不弹通知，报告具体失败任务。
-- **下载失败**：保留已下载文件，报告下载失败项，不弹通知。
-- 不会自动重跑失败任务（避免额度消耗）。
-
-## 输出
-
-图片输出至 `output_dir` 下的 `{时间戳}_{文章标题}` 子目录，同时生成 `manifest.json` 记录完整任务信息。
-
-## 项目结构
-
-```
-universal-wechat-apimart-images/
-├── scripts/
-│   └── generate_wechat_images.py   # 核心生图脚本
-├── SKILL.md                        # 技能描述文档（供 AI 智能体使用）
-└── README.md                       # 本文件
-```
-
-## 许可证
-
-MIT
+许可证为 [MIT](LICENSE)。

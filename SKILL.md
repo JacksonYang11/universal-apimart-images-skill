@@ -184,11 +184,17 @@ JSON 中记录 `article_source`：
 macOS / zsh：
 
 ```bash
-# 确保当前 shell 已设置 APIMART_API_KEY
+# 首先由用户在项目根目录的 .secrets.json 中填写 API 配置
 python3 "scripts/generate_wechat_images.py" "path/to/tasks.json"
+# 临时切换另一组 URL + Key
+python3 "scripts/generate_wechat_images.py" "path/to/tasks.json" --profile backup
 ```
 
-不要让用户在聊天里粘贴 API key。脚本读取用户环境变量 `APIMART_API_KEY`。
+凭证只保存在项目根目录的 `.secrets.json`，结构见 `.secrets.example.json`。`profiles` 下保存 `primary`、`backup` 两组 `api_base` / `api_key`，默认采用 `active_profile`，可通过 `--profile` 临时选择。两组服务须兼容当前接口和模型；恢复已有任务时使用原服务和账号。
+
+脚本依据自身真实路径读取配置，不读取旧的 API 环境变量，不接受单独的 `--api-key` / `--api-base` 参数。Agent 调用脚本即可，不要为了执行任务读取或展示私密文件内容，也不要让用户在聊天里粘贴密钥。缺少配置时提示用户在本机填写后再运行。`--dry-run` 不调用接口，允许配置值留空。
+
+`.secrets.json` 及其备份只留本机，Git 已忽略。向 Trae 或其他 Agent 上传、打包 Skill 时须排除这些文件，不能假定上传功能遵守 `.gitignore`。
 
 脚本固定提交：
 
@@ -204,8 +210,8 @@ python3 "scripts/generate_wechat_images.py" "path/to/tasks.json"
 脚本策略：
 
 1. 先提交全部生图任务。
-2. 全部拿到 `task_id` 后等待 180 秒。
-3. 每 60 秒批量轮询所有任务。
+2. 全部拿到 `task_id` 后，默认等待 90 秒再做首次查询。
+3. 还有任务未完成时，默认每 45 秒批量查询一次。
 4. 任务完成后立即下载对应图片，记录已下载的图片编号，避免重复生成和下载。
 5. 全部下载成功后，才播放声音和弹窗通知。
 
@@ -239,9 +245,9 @@ python3 "scripts/generate_wechat_images.py" "path/to/tasks-resume.json" --run-di
 
 ## AI 智能体行为铁律（防止误判卡死、浪费额度）
 
-生成脚本的输出时间线是：**提交所有任务（秒级）→ 静默等 180 秒 → 每 60 秒轮询一次**。从启动到第一次有意义的轮询输出，至少需要 3 分钟以上。因此 AI 智能体在监控脚本运行时必须遵守以下规则：
+脚本默认在提交完所有任务后等待 90 秒，再发起第一次查询。有未完成的任务时，每隔 45 秒继续查询。
 
-1. **启动后第一次检查至少要等 3 分钟以上。** 建议节奏：180s → 60s → 60s → 60s 逐步检查，而不是 30s 起步频繁查询。
+1. **按脚本实际设置的等待时间检查进度。** 使用默认值时，提交后 90 秒检查首次查询，此后每 45 秒检查一次。
 2. **绝不可以凭"输出为空"就判卡死。** 异步脚本在初始等待期内和轮询间隔内输出为空是完全正常的。
 3. **不确定是否真卡死时，先查输出目录的 `manifest.json`。** 如果 `manifest.json` 已存在且其中每张图片都有 `task_id` 和 `status: "submitted"`，说明任务已提交成功，脚本只是在等轮询，绝不能停掉重跑。重跑会导致重复提交新任务，白白消耗图片额度。
 4. **只有在以下情况才能判定脚本异常并终止：**（a）脚本进程已退出且退出码非 0；（b）超过 20 分钟仍无任何输出也无 manifest.json 生成；（c）manifest.json 明确记录了 `submit failed` 错误。
