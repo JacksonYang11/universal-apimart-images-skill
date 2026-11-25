@@ -13,7 +13,7 @@ description: 通用微信公众号文章 APIMart 批量生图技能。根据文�
 
 - 使用 Python 3.10 或更新版本。生图服务需支持 `gpt-image-2`、`POST /v1/images/generations` 和 `GET /v1/tasks/{task_id}`。
 - 在项目根目录的 `.secrets.json` 中配置 HTTPS 基础地址和 API Key，格式见 [配置样例](.secrets.example.json)。脚本默认使用 `active_profile`，可用 `--profile` 临时选择另一组。恢复已有任务时使用原服务和账号。
-- 凭证由脚本直接读取。打包或上传 Skill 时排除本机的 `.secrets.json`。网络连接按运行环境配置。
+- 凭证由脚本直接读取。在 macOS 或 Linux 上可用 `chmod 600 .secrets.json` 限制读写权限。打包或上传 Skill 时排除本机的 `.secrets.json`。网络连接按运行环境配置。
 
 ### 插图规划与提示词生成规则（必读）
 
@@ -149,6 +149,7 @@ python3 scripts/generate_wechat_images.py path/to/tasks.json
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
 | `json_file` | JSON 任务文件路径（必填） | - |
+| `-h`、`--help` | 打印全部参数说明后退出 | - |
 | `--profile` | 选择 `.secrets.json` 中的一组 API 配置 | `active_profile` |
 | `--output-dir` | 脚本无法定位文章目录时的兜底根目录 | 任务 JSON 的 `output_dir` 或 `~/Pictures/AI-generated-images` |
 | `--run-dir` | 指定已有分组的输出目录 | 按文章路径和 `group` 自动定位 |
