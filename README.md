@@ -11,25 +11,37 @@
 
 ## 怎么用
 
-**用 AI Agent。** 提供文章文件或正文，让 Agent 按 [SKILL.md](SKILL.md) 执行。可以直接这样提需求。
+**用 AI Agent。** 提供文章的 Markdown 文件，让 Agent 按 [SKILL.md](SKILL.md) 执行。可以直接这样提需求。
 
 > 给这篇公众号文章做一张封面和几张正文插图，包含一张开篇图。先给我看导语和完整提示词，等我确认后再生成图片。
 
-**直接运行脚本。** 如果已有生图任务 JSON，在项目根目录运行下方命令。任务格式和开篇插图要求见 [SKILL.md 的 JSON 任务说明](SKILL.md#json-任务)。
+未指定画风时，Agent 默认采用新工笔国风。脚本默认请求适合公众号配图的 `16:9` 横图。
+
+**直接运行脚本。** 如果已有生图任务 JSON，在项目根目录运行下方命令。任务格式和开篇插图要求见 [SKILL.md 的 JSON 任务说明](SKILL.md#json-任务文件格式)。
 
 ```bash
 python3 scripts/generate_wechat_images.py path/to/tasks.json
 ```
 
-图片默认保存到 `~/AI-generated-images/` 下以时间和文章标题命名的子目录。打开其中的 `preview.html` 可以逐张检查。
+图片保存到文章所在目录下的 `AI-generated-images/`。新分组遇到已有目录时，依次使用 `AI-generated-images1/`、`AI-generated-images2/` 等。下载完成后，由用户打开其中的 `preview.html` 逐张检查。
+
+## 配图分组与输出目录
+
+一组 = 一套图（封面 + 开篇 + 各章节插图），同一组的图片落在同一个文件夹。
+
+- 任务 JSON 的 `article_source` 要填文章 Markdown 的真实路径，脚本据此定位文章目录并下载图片。
+- `group` 标识一组配图：同一 `group` 再次执行会复用原目录，并跳过已下载的图片；换新一组则新建编号目录。
+- 未填 `group` 时，每次运行都视为新组。
+- `article_source` 无法定位文章目录时，脚本会告警，默认回退到 `~/Pictures/AI-generated-images/{时间戳}_{标题}`。正常配图流程须提供文章的真实路径。
+- 记下脚本打印的 `Output folder`，该组后续的生成、恢复和展示都只用这个目录。
 
 ## 工作原理
 
-Agent 根据文章写提示词，将你确认的内容整理成任务 JSON。Python 脚本读取本机选中的 URL 和 Key，向生图服务提交任务。提交完成后默认等待 90 秒，之后每 45 秒查询一次未完成的任务。图片生成后下载到本机。任务记录保存在 `manifest.json`，可用于恢复执行。
+Agent 根据文章拟导语和提示词，并将你确认的内容整理成任务 JSON。Python 脚本读取本机选中的 URL 和 Key，向生图服务提交任务。提交完成后默认等待 120 秒，之后每 60 秒查询一次未完成的任务。图片生成后下载到本机。任务记录保存在 `manifest.json`，可用于恢复执行。
 
 ## 详细用法
 
 - 任务字段、提示词规则、参考图和中断恢复见 [SKILL.md](SKILL.md)。
-- 查看所有命令行参数可运行 `python3 scripts/generate_wechat_images.py --help`。常用参数有 `--profile backup`（临时换一组配置）和 `--dry-run`（只验证任务并生成预览）。
+- 查看所有命令行参数可运行 `python3 scripts/generate_wechat_images.py --help`。常用参数有 `--profile backup`（临时换一组配置）、`--run-dir`（明确指定恢复时使用的分组目录）、`--output-dir`（文章目录无法定位时的兜底根目录）和 `--dry-run`（只验证任务并生成预览）。
 
 许可证为 [MIT](LICENSE)。

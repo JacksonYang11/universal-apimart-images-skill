@@ -22,7 +22,10 @@ from urllib.request import Request, urlopen
 
 
 SECRETS_FILE = Path(__file__).resolve().parent.parent / ".secrets.json"
-DEFAULT_OUTPUT_DIR = "~/AI-generated-images"
+DEFAULT_OUTPUT_DIR = "~/Pictures/AI-generated-images"
+GROUP_DIR_NAME = "AI-generated-images"
+DEFAULT_IMAGE_SIZE = "16:9"
+DEFAULT_IMAGE_RESOLUTION = "1k"
 COMPLETE_STATUSES = {"completed", "complete", "succeeded", "success", "done", "finished"}
 FAILED_STATUSES = {"failed", "failure", "error", "cancelled", "canceled", "timeout"}
 
@@ -69,10 +72,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate and download APIMart GPT-Image-2 tasks.")
     parser.add_argument("json_file", help="Path to the approved WeChat image task JSON.")
     parser.add_argument("--profile", default=None, help="Profile in the project's .secrets.json. Defaults to active_profile.")
-    parser.add_argument("--output-dir", default=None, help=f"Output root. Defaults to JSON output_dir or {DEFAULT_OUTPUT_DIR}.")
-    parser.add_argument("--run-dir", default=None, help="Exact output folder to use. Useful when resuming existing task IDs.")
-    parser.add_argument("--initial-wait", type=float, default=90.0, help="Seconds to wait after all tasks are submitted before first polling attempt (default: %(default)g).")
-    parser.add_argument("--poll-interval", type=float, default=45.0, help="Seconds between batch polling attempts (default: %(default)g).")
+    parser.add_argument("--output-dir", default=None, help=f"Fallback output root used only when article_source cannot be resolved. Defaults to JSON output_dir or {DEFAULT_OUTPUT_DIR}.")
+    parser.add_argument("--run-dir", default=None, help="Exact group folder to use when resuming, as an alternative to locating it by article and group.")
+    parser.add_argument("--initial-wait", type=float, default=120.0, help="Seconds to wait after all tasks are submitted before first polling attempt (default: %(default)g).")
+    parser.add_argument("--poll-interval", type=float, default=60.0, help="Seconds between batch polling attempts (default: %(default)g).")
     parser.add_argument("--timeout", type=float, default=900.0, help="Maximum seconds to wait after the initial wait for all tasks.")
     parser.add_argument("--dry-run", action="store_true", help="Validate input and show planned API payloads without calling APIMart.")
     parser.add_argument("--no-notify", action="store_true", help="Disable completion sound and message box.")
@@ -81,26 +84,33 @@ def main() -> int:
     task_file = Path(args.json_file).expanduser().resolve()
     data = load_json(task_file)
     article_title = str(data.get("article_title") or data.get("title") or "wechat_article").strip()
+    group = str(data.get("group") or "").strip()
     images = data.get("images")
     if not isinstance(images, list) or not images:
         raise SystemExit("JSON must contain a non-empty images array.")
 
     profile, api_base, api_key = load_api_profile(args.profile, require_credentials=not args.dry_run)
-    size = str(data.get("size") or "16:9").strip()
-    resolution = str(data.get("resolution") or "1k").strip()
+    size = str(data.get("size") or "").strip() or DEFAULT_IMAGE_SIZE
+    resolution = str(data.get("resolution") or "").strip() or DEFAULT_IMAGE_RESOLUTION
 
     if args.run_dir:
         run_dir = Path(args.run_dir).expanduser()
     else:
-        output_root = Path(args.output_dir or data.get("output_dir") or DEFAULT_OUTPUT_DIR).expanduser()
-        run_dir = output_root / f"{dt.datetime.now():%Y%m%d_%H%M%S}_{sanitize_filename(article_title)}"
+        run_dir = resolve_run_dir(data, article_title, task_file, args.output_dir, group)
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    existing_manifest = read_manifest(run_dir)
+    same_group = bool(group) and str(existing_manifest.get("group", "")) == group
+    prior_tasks = [
+        item for item in existing_manifest.get("tasks", []) if isinstance(item, dict)
+    ] if same_group else []
 
     tasks = [normalize_image_task(item, index, task_file.parent) for index, item in enumerate(images)]
     manifest: dict[str, Any] = {
         "article_title": article_title,
         "article_source": data.get("article_source", ""),
         "wechat_intro": data.get("wechat_intro", ""),
+        "group": group,
         "created_at": dt.datetime.now().isoformat(timespec="seconds"),
         "api_profile": profile,
         "model": "gpt-image-2",
@@ -108,7 +118,7 @@ def main() -> int:
         "size": size,
         "n": 1,
         "output_dir": str(run_dir),
-        "tasks": [],
+        "tasks": list(prior_tasks),
     }
 
     if args.dry_run:
@@ -123,7 +133,14 @@ def main() -> int:
     failures = 0
     records: list[dict[str, Any]] = []
     record_tasks: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    prior_by_name = {str(item.get("name")): item for item in prior_tasks}
     for task in tasks:
+        prior = prior_by_name.get(task["name"])
+        if prior and prior.get("status") == "downloaded" and prior.get("files") and not task.get("task_id"):
+            records.append(prior)
+            record_tasks.append((prior, task))
+            print(f"[skip] {task['name']} 已在本组中生成，沿用 {prior['files'][0]}")
+            continue
         record: dict[str, Any] = {
             "name": task["name"],
             "usage": task["usage"],
@@ -159,7 +176,7 @@ def main() -> int:
         finally:
             write_manifest_and_preview(run_dir, manifest)
 
-    if failures == 0:
+    if failures == 0 and any(record.get("status") == "submitted" for record in records):
         print(f"[wait] all tasks started; waiting {max(args.initial_wait, 0):g} seconds before polling")
         time.sleep(max(args.initial_wait, 0))
         failures += poll_all_tasks(records, manifest, run_dir, api_base, api_key, args.poll_interval, args.timeout, record_tasks)
@@ -192,6 +209,73 @@ def load_json(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise SystemExit("Top-level JSON value must be an object.")
     return data
+
+
+def resolve_run_dir(data: dict[str, Any], article_title: str, task_file: Path, output_dir_arg: str | None, group: str) -> Path:
+    article_dir = resolve_article_dir(data.get("article_source"), task_file)
+    if article_dir is not None:
+        if group:
+            same_group_dir = find_group_dir(article_dir, group)
+            if same_group_dir is not None:
+                print(f"[group] 复用已有分组目录（group={group}）：{same_group_dir}")
+                return same_group_dir
+        return next_group_dir(article_dir)
+    output_root = Path(output_dir_arg or data.get("output_dir") or DEFAULT_OUTPUT_DIR).expanduser()
+    run_dir = output_root / f"{dt.datetime.now():%Y%m%d_%H%M%S}_{sanitize_filename(article_title)}"
+    print(f"[warn] article_source 无法解析为文章目录，回退到旧输出目录：{output_root}", file=sys.stderr)
+    return run_dir
+
+
+def resolve_article_dir(article_source: Any, task_file: Path) -> Path | None:
+    if article_source is None:
+        return None
+    raw = str(article_source).strip()
+    if not raw or raw.lower() in {"conversation", "pasted_text", "pasted text", "chat"}:
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_absolute():
+        path = task_file.parent / path
+    try:
+        path = path.resolve()
+    except OSError:
+        return None
+    if path.is_file():
+        return path.parent if path.parent.is_dir() else None
+    if path.is_dir():
+        return path
+    return None
+
+
+def next_group_dir(article_dir: Path) -> Path:
+    base = article_dir / GROUP_DIR_NAME
+    if not base.exists():
+        return base
+    index = 1
+    while (article_dir / f"{GROUP_DIR_NAME}{index}").exists():
+        index += 1
+    return article_dir / f"{GROUP_DIR_NAME}{index}"
+
+
+def find_group_dir(article_dir: Path, group: str) -> Path | None:
+    candidates = [article_dir / GROUP_DIR_NAME]
+    candidates.extend(sorted(
+        (path for path in article_dir.glob(f"{GROUP_DIR_NAME}[0-9]*") if path.is_dir()),
+        key=lambda path: int(path.name[len(GROUP_DIR_NAME):] or 0)))
+    for path in candidates:
+        if path.is_dir() and str(read_manifest(path).get("group", "")) == group:
+            return path
+    return None
+
+
+def read_manifest(run_dir: Path) -> dict[str, Any]:
+    path = run_dir / "manifest.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def normalize_image_task(item: Any, index: int, base_dir: Path) -> dict[str, Any]:
@@ -237,12 +321,17 @@ def normalize_reference(ref: Any, base_dir: Path) -> str:
 
 QUALITY_SUFFIX = (
     "。注意：人物必须五官端正、手指数量正常（单手五指）、身体结构准确；"
-    "器物和武器必须形态正常、无扭曲变形；画面透视和空间关系合理；"
-    "画面中不要出现大段说明性文字，可有少量简洁文字点缀。"
+    "器物和武器必须形态正常、无扭曲变形；画面透视和空间关系合理。"
+    "仅绘制提示词明确指定文字、载体和位置的少量文字，文字须符合场景、时代和画风。"
+    "禁止人物身上或旁边的名牌和身份标签、悬浮标注、地名说明和字幕。"
 )
 
 
-def build_payload(task: dict[str, Any], size: str = "16:9", resolution: str = "1k") -> dict[str, Any]:
+def build_payload(
+    task: dict[str, Any],
+    size: str = DEFAULT_IMAGE_SIZE,
+    resolution: str = DEFAULT_IMAGE_RESOLUTION,
+) -> dict[str, Any]:
     prompt = task["prompt"].rstrip()
     if not prompt.endswith(QUALITY_SUFFIX):
         prompt = prompt + QUALITY_SUFFIX
@@ -556,6 +645,9 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def write_preview(path: Path, manifest: dict[str, Any]) -> None:
+    size = str(manifest.get("size") or DEFAULT_IMAGE_SIZE)
+    ratio = re.fullmatch(r"([1-9][0-9]*):([1-9][0-9]*)", size)
+    aspect_ratio = f"{ratio[1]} / {ratio[2]}" if ratio else DEFAULT_IMAGE_SIZE.replace(":", " / ")
     cards = []
     for task in manifest.get("tasks", []):
         files = task.get("files") or []
@@ -586,7 +678,7 @@ def write_preview(path: Path, manifest: dict[str, Any]) -> None:
     .intro {{ color: #52616b; margin: 0 0 24px; }}
     .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }}
     section {{ background: #fff; border: 1px solid #d9e2ec; border-radius: 8px; overflow: hidden; }}
-    img {{ width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; background: #e4e7eb; }}
+    img {{ width: 100%; aspect-ratio: {aspect_ratio}; object-fit: cover; display: block; background: #e4e7eb; }}
     h2 {{ font-size: 17px; margin: 14px 16px 4px; }}
     .meta {{ margin: 0 16px 10px; color: #7b8794; font-size: 13px; }}
     pre {{ white-space: pre-wrap; word-break: break-word; margin: 0; padding: 0 16px 16px; font-family: inherit; font-size: 14px; line-height: 1.6; }}
